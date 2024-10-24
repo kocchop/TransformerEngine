@@ -30,6 +30,7 @@ from ..attention import fused_attn
 from ..softmax import SoftmaxType
 from ..sharding import num_of_devices
 from ..sharding import get_sharding_map_logic_axis_to_mesh_axis
+from ..sharding import get_mesh_axis_size
 from ..sharding import with_sharding_constraint_by_logical_axes
 from ..sharding import BATCH_AXES, SEQLEN_AXES, SEQLEN_TP_AXES, HEAD_AXES
 from ..sharding import HIDDEN_AXES, HIDDEN_TP_AXES, JOINED_AXES
@@ -262,6 +263,8 @@ class _FusedDotProductAttention(nn.Module):  # pylint: disable=too-few-public-me
     scale_factor: Optional[float] = None
     transpose_batch_sequence: bool = False
     window_size: Optional[Tuple[int, int]] = None
+    context_parallel_causal_load_balanced: bool = False
+    context_parallel_axis: str = ""
 
     @nn.compact
     def __call__(
@@ -308,6 +311,8 @@ class _FusedDotProductAttention(nn.Module):  # pylint: disable=too-few-public-me
                 dropout_probability=self.attention_dropout,
                 is_training=not deterministic,
                 window_size=self.window_size,
+                context_parallel_causal_load_balanced=self.context_parallel_causal_load_balanced,
+                context_parallel_axis=self.context_parallel_axis,
             )
         elif self.qkv_layout == QKVLayout.BSHD_BS2HD:
             """kvpacked format, treat
@@ -331,6 +336,8 @@ class _FusedDotProductAttention(nn.Module):  # pylint: disable=too-few-public-me
                 dropout_probability=self.attention_dropout,
                 is_training=not deterministic,
                 window_size=self.window_size,
+                context_parallel_causal_load_balanced=self.context_parallel_causal_load_balanced,
+                context_parallel_axis=self.context_parallel_axis,
             )
         elif self.qkv_layout == QKVLayout.BSHD_BSHD_BSHD:
             if self.transpose_batch_sequence:
@@ -349,6 +356,8 @@ class _FusedDotProductAttention(nn.Module):  # pylint: disable=too-few-public-me
                 dropout_probability=self.attention_dropout,
                 is_training=not deterministic,
                 window_size=self.window_size,
+                context_parallel_causal_load_balanced=self.context_parallel_causal_load_balanced,
+                context_parallel_axis=self.context_parallel_axis,
             )
         else:
             raise ValueError(f"Unsupported {self.qkv_layout=}.")
@@ -483,6 +492,8 @@ class DotProductAttention(nn.Module):  # pylint: disable=too-few-public-methods
     scale_factor: Optional[float] = None
     transpose_batch_sequence: bool = True
     window_size: Optional[Tuple[int, int]] = None
+    context_parallel_causal_load_balanced: bool = False
+    context_parallel_axis: str = ""
 
     @nn.compact
     def __call__(
@@ -543,6 +554,8 @@ class DotProductAttention(nn.Module):  # pylint: disable=too-few-public-methods
             seqlen_kv = seqlen_q
         else:
             seqlen_kv = key.shape[sequence_dim]
+        
+        is_context_parallel = get_mesh_axis_size(self.context_parallel_axis) > 1
 
         has_fused_attn_kernel = is_fused_attn_kernel_available(
             self.dtype,
@@ -557,6 +570,7 @@ class DotProductAttention(nn.Module):  # pylint: disable=too-few-public-methods
             seqlen_kv,
             self.head_dim,
             self.window_size,
+            is_context_parallel,
         )
 
         use_fused_attn = enable_fused_attn and has_fused_attn_kernel
@@ -614,6 +628,8 @@ class DotProductAttention(nn.Module):  # pylint: disable=too-few-public-methods
                 transpose_batch_sequence=self.transpose_batch_sequence,
                 qkv_layout=qkv_layout,
                 window_size=self.window_size,
+                context_parallel_causal_load_balanced=self.context_parallel_causal_load_balanced,
+                context_parallel_axis=self.context_parallel_axis,
             )(query, key, value, mask, bias, dropout_rng=dropout_rng, deterministic=deterministic)
 
         return x
