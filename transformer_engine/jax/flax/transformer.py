@@ -472,6 +472,9 @@ class DotProductAttention(nn.Module):  # pylint: disable=too-few-public-methods
         should be in (seqlen, batch, ...), otherwise (batch, seqlen, ...).
     window_size: Optional[Tuple[int, int]], default = None
         Sliding window size. The default value is no sliding window.
+    context_parallel_causal_load_balanced (bool):
+            Indicates the sequences are ordered for causal mask load balancing when running context parallelism.
+        context_parallel_axis (str): The name of the context parallel axis.
 
     Optimization parameters
     -----------------------
@@ -554,8 +557,6 @@ class DotProductAttention(nn.Module):  # pylint: disable=too-few-public-methods
             seqlen_kv = seqlen_q
         else:
             seqlen_kv = key.shape[sequence_dim]
-        
-        is_context_parallel = get_mesh_axis_size(self.context_parallel_axis) > 1
 
         has_fused_attn_kernel = is_fused_attn_kernel_available(
             self.dtype,
@@ -570,7 +571,6 @@ class DotProductAttention(nn.Module):  # pylint: disable=too-few-public-methods
             seqlen_kv,
             self.head_dim,
             self.window_size,
-            is_context_parallel,
         )
 
         use_fused_attn = enable_fused_attn and has_fused_attn_kernel
